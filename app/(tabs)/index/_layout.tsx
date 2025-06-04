@@ -31,6 +31,10 @@ export default function RootLayout() {
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack>
         <Stack.Screen name="indexHome" options={{ headerShown: false }} />
+        <Stack.Screen name="tithes" options={{ headerShown: true }} />
+        <Stack.Screen name="offering" options={{ headerShown: true }} />
+        <Stack.Screen name="donation" options={{ headerShown: true }} />
+        <Stack.Screen name="specialseed" options={{ headerShown: true }} />
       </Stack>
       <StatusBar style="auto" />
     </ThemeProvider>
