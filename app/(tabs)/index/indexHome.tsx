@@ -1,14 +1,50 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
-import React from 'react';
-import { Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import {
+  Image,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 
 const HomeScreen = () => {
+  const [userName, setUserName] = useState('');
+  const [profileImage, setProfileImage] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadUser = async () => {
+      try {
+        const userData = await AsyncStorage.getItem('userInfo');
+        if (userData) {
+          const user = JSON.parse(userData);
+          setUserName(user.name);
+          setProfileImage(user.profileImage || null);
+        }
+      } catch (error) {
+        console.error('Failed to load user data:', error);
+      }
+    };
+
+    loadUser();
+  }, []);
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
       {/* Profile Section */}
       <View style={styles.profileContainer}>
-        <Image source={require('@/assets/images/dummy.png')} style={styles.profileImage} />
-        <Text style={styles.welcomeText}>Welcome John!</Text>
+        <Image
+          source={
+            profileImage
+              ? { uri: profileImage }
+              : require('@/assets/images/dummy.png')
+          }
+          style={styles.profileImage}
+        />
+        <Text style={styles.welcomeText}>Welcome {userName}</Text>
       </View>
 
       {/* Scripture Section */}

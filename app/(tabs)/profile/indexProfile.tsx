@@ -1,52 +1,98 @@
+import { BASE_URL } from '@/constants/api';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Image,
-  Platform,
   Pressable,
   SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
-  View,
+  View
 } from 'react-native';
 
 const ProfileScreen = () => {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
-
-  const userData = {
-    fullName: 'John Doe',
-    email: 'john.doe@example.com',
-    phone: '+237 620 123 456',
-  };
+  const [userData, setUserData] = useState({ fullName: '', email: '', phone: '' });
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
-    (async () => {
-      if (Platform.OS !== 'web') {
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== 'granted') {
-          Alert.alert('Permission Required', 'We need access to your photo library.');
+    const loadUser = async () => {
+      try {
+        const data = await AsyncStorage.getItem('userInfo');
+        if (data) {
+          const user = JSON.parse(data);
+          setUserData({
+            fullName: user.name,
+            email: user.email,
+            phone: user.phone,
+          });
+          if (user.profileImage) {
+            setSelectedImage(user.profileImage);
+          }
         }
+      } catch (err) {
+        console.error('Failed to load user info:', err);
       }
-    })();
+    };
+
+    loadUser();
   }, []);
 
   const pickImage = async () => {
-    try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 1,
-      });
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission Required', 'We need access to your photo library.');
+      return;
+    }
 
-      if (!result.canceled) {
-        setSelectedImage(result.assets[0].uri);
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 1,
+      base64: true,
+    });
+
+    if (!result.canceled) {
+      const base64 = result.assets[0].base64;
+      const uri = result.assets[0].uri;
+
+      setUploading(true);
+      try {
+        const token = await AsyncStorage.getItem('token');
+        const response = await fetch(`${BASE_URL}/user/profile-picture`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            profilePicture: {
+              data: base64,
+              contentType: 'image/jpeg',
+            },
+          }),
+        });
+
+        const resData = await response.json();
+        if (response.ok) {
+          setSelectedImage(resData.user.profileImage);
+          await AsyncStorage.setItem('userInfo', JSON.stringify(resData.user));
+          Alert.alert('Success', 'Profile picture updated!');
+        } else {
+          Alert.alert('Upload failed', resData.message || 'Something went wrong');
+        }
+      } catch (err) {
+        console.error(err);
+        Alert.alert('Error', 'Could not upload image.');
+      } finally {
+        setUploading(false);
       }
-    } catch (error) {
-      Alert.alert('Error', 'Something went wrong while picking the image.');
     }
   };
 
@@ -58,18 +104,20 @@ const ProfileScreen = () => {
     <SafeAreaView style={styles.container}>
       <Text style={styles.title}>My Profile</Text>
 
-      {/* Profile Image Section */}
       <View style={styles.imageContainer}>
         <Image
           source={selectedImage ? { uri: selectedImage } : require('@/assets/images/dummy.png')}
           style={styles.image}
         />
         <Pressable style={styles.editIconContainer} onPress={pickImage}>
-          <Ionicons name="pencil" size={20} color="#fff" />
+          {uploading ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <Ionicons name="pencil" size={20} color="#fff" />
+          )}
         </Pressable>
       </View>
 
-      {/* Profile Info */}
       <View style={styles.profileSection}>
         <Text style={styles.label}>Full Name</Text>
         <TextInput value={userData.fullName} editable={false} style={styles.input} />
@@ -89,6 +137,7 @@ const ProfileScreen = () => {
 };
 
 export default ProfileScreen;
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
