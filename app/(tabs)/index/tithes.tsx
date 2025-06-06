@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import { BASE_URL } from '@/constants/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Animated,
-  Easing,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -10,7 +12,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  View,
+  View
 } from 'react-native';
 
 const TithesPaymentScreen = () => {
@@ -18,36 +20,118 @@ const TithesPaymentScreen = () => {
   const [amount, setAmount] = useState('');
   const [phone, setPhone] = useState('');
   const [useDefaultNumber, setUseDefaultNumber] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   const [scaleAnim] = useState(new Animated.Value(1));
 
+  // Load user phone from AsyncStorage if using default
+  useEffect(() => {
+    const loadPhone = async () => {
+      try {
+        const userData = await AsyncStorage.getItem('userInfo');
+        if (userData) {
+          const user = JSON.parse(userData);
+          if (user.phone) setPhone(user.phone.toString());
+        }
+      } catch (err) {
+        console.error('Failed to load user info:', err);
+      }
+    };
+
+    if (useDefaultNumber) loadPhone();
+  }, [useDefaultNumber]);
+
   const handleTogglePhone = () => {
     setUseDefaultNumber(!useDefaultNumber);
-    if (useDefaultNumber) setPhone('');
+    if (!useDefaultNumber) setPhone('');
   };
 
-  const handlePayment = () => {
-    Animated.sequence([
-      Animated.timing(scaleAnim, {
-        toValue: 0.95,
-        duration: 100,
-        easing: Easing.linear,
-        useNativeDriver: true,
+  const handlePayment = async () => {
+  if (!nameOrCode || !amount) {
+    Alert.alert('Missing Fields', 'Please enter your name/code and amount.');
+    return;
+  }
+
+  setLoading(true);
+
+  let finalPhone = phone.replace(/\s+/g, '');
+  if (!finalPhone.startsWith('237')) {
+    finalPhone = '237' + finalPhone;
+  }
+
+  try {
+    const token = await AsyncStorage.getItem('token');
+
+    // 1. Initiate payment
+    const collectRes = await fetch(`${BASE_URL}/payment/collect-payment`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        amount: parseInt(amount),
+        phoneNumber: finalPhone,
       }),
-      Animated.timing(scaleAnim, {
-        toValue: 1,
-        duration: 100,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      Alert.alert(
-        'Payment Initiated',
-        `Your payment of XAF${amount} has been initiated.`,
-        [{ text: 'OK' }]
-      );
     });
-  };
+
+    const collectData = await collectRes.json();
+    console.log(collectData)
+    if (!collectRes.ok) {
+      throw new Error(collectData.error || 'Failed to initiate payment');
+    }
+
+    const paymentId = collectData.data?.id;
+
+    Alert.alert('Payment Initiated', 'Please complete the payment on your phone.');
+
+    // 2. Wait 10 seconds before checking status
+    await new Promise(resolve => setTimeout(resolve, 10000));
+
+    // 3. Check payment status
+    const statusRes = await fetch(`${BASE_URL}/payment/${paymentId}`);
+    const statusData = await statusRes.json();
+    console.log("statusData: "+statusData)
+    const status = statusData.data?.status;
+    console.log("status: "+status)
+    const isSuccess = status === 'Success';
+    console.log("status: "+status, " success: "+isSuccess)
+
+    // 4. Store transaction
+    const saveTxRes = await fetch(`${BASE_URL}/transactions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        name: nameOrCode,
+        amount: parseInt(amount),
+        phoneNumber: finalPhone,
+        category: 'Tithe', // or dynamic
+        status: isSuccess ? 'Success' : 'Failed',
+        referenceId: paymentId,
+      }),
+    });
+
+    if (!saveTxRes.ok) {
+      const errData = await saveTxRes.json();
+      throw new Error(errData.message || 'Failed to store transaction');
+    }
+
+    if (isSuccess) {
+      Alert.alert('Success', 'Your payment was successful and recorded.');
+    } else {
+      Alert.alert('Failed', 'Payment not completed. Transaction saved for reference.');
+    }
+
+  } catch (err) {
+    console.error(err);
+    Alert.alert('Error', err.message || 'An error occurred during payment.');
+  } finally {
+    setLoading(false);
+  }
+};
+
 
   return (
     <SafeAreaView style={styles.container}>
@@ -67,6 +151,7 @@ const TithesPaymentScreen = () => {
             value={nameOrCode}
             onChangeText={setNameOrCode}
             style={styles.input}
+            editable={!loading}
           />
 
           <TextInput
@@ -75,6 +160,7 @@ const TithesPaymentScreen = () => {
             onChangeText={setAmount}
             keyboardType="numeric"
             style={styles.input}
+            editable={!loading}
           />
 
           {!useDefaultNumber && (
@@ -84,10 +170,11 @@ const TithesPaymentScreen = () => {
               onChangeText={setPhone}
               keyboardType="phone-pad"
               style={styles.input}
+              editable={!loading}
             />
           )}
 
-          <Pressable onPress={handleTogglePhone} style={styles.toggleButton}>
+          <Pressable onPress={handleTogglePhone} style={styles.toggleButton} disabled={loading}>
             <Text style={styles.toggleText}>
               {useDefaultNumber
                 ? 'Use another phone number'
@@ -96,15 +183,24 @@ const TithesPaymentScreen = () => {
           </Pressable>
 
           <Animated.View style={{ transform: [{ scale: scaleAnim }], width: '100%' }}>
-            <Pressable style={styles.payButton} onPress={handlePayment}>
-              <Text style={styles.payText}>Pay Now</Text>
+            <Pressable
+              style={[styles.payButton, loading && { opacity: 0.6 }]}
+              onPress={handlePayment}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.payText}>Pay Now</Text>
+              )}
             </Pressable>
           </Animated.View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
-}
+};
+
 export default TithesPaymentScreen;
 
 const styles = StyleSheet.create({
@@ -126,14 +222,13 @@ const styles = StyleSheet.create({
     fontFamily: 'sans-serif',
   },
   scripture: {
-  color: '#FFD700',
-  fontSize: 16,
-  fontStyle: 'italic',
-  textAlign: 'center',
-  marginBottom: 10,
-  fontFamily: 'sans-serif',
-},
-
+    color: '#FFD700',
+    fontSize: 16,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    marginBottom: 10,
+    fontFamily: 'sans-serif',
+  },
   input: {
     width: '100%',
     borderWidth: 2,
