@@ -67,8 +67,8 @@ const HomeScreen = () => {
         <TouchableOpacity style={styles.card} onPress={()=>router.push("/donation")}>
           <Text style={styles.cardText}>Donation</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.card} onPress={()=>router.push("/specialseed")}>
-          <Text style={styles.cardText}>Special Seed</Text>
+        <TouchableOpacity style={styles.card} onPress={()=>router.push("/partnership")}>
+          <Text style={styles.cardText}>Partnership</Text>
         </TouchableOpacity>
       </View>
     </ScrollView>

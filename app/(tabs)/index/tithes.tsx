@@ -46,7 +46,7 @@ const TithesPaymentScreen = () => {
     if (!useDefaultNumber) setPhone('');
   };
 
-  const handlePayment = async () => {
+const handlePayment = async () => {
   if (!nameOrCode || !amount) {
     Alert.alert('Missing Fields', 'Please enter your name/code and amount.');
     return;
@@ -73,64 +73,85 @@ const TithesPaymentScreen = () => {
         phoneNumber: finalPhone,
       }),
     });
-
     const collectData = await collectRes.json();
-    console.log(collectData)
-    if (!collectRes.ok) {
+    if (!collectRes.ok || !collectData?.data?.id) {
       throw new Error(collectData.error || 'Failed to initiate payment');
     }
 
-    const paymentId = collectData.data?.id;
-
+    const paymentId = collectData.data.id;
     Alert.alert('Payment Initiated', 'Please complete the payment on your phone.');
 
-    // 2. Wait 10 seconds before checking status
-    await new Promise(resolve => setTimeout(resolve, 10000));
+    // 2. Wait 10 seconds
+    await new Promise(resolve => setTimeout(resolve, 70000));
 
     // 3. Check payment status
     const statusRes = await fetch(`${BASE_URL}/payment/${paymentId}`);
     const statusData = await statusRes.json();
-    console.log("statusData: "+statusData)
-    const status = statusData.data?.status;
-    console.log("status: "+status)
-    const isSuccess = status === 'Success';
-    console.log("status: "+status, " success: "+isSuccess)
 
-    // 4. Store transaction
-    const saveTxRes = await fetch(`${BASE_URL}/transactions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        name: nameOrCode,
-        amount: parseInt(amount),
-        phoneNumber: finalPhone,
-        category: 'Tithe', // or dynamic
-        status: isSuccess ? 'Success' : 'Failed',
-        referenceId: paymentId,
-      }),
-    });
+    const status = statusData?.data?.status;
+    console.log("status",status)
+    const isSuccess = status.toLowerCase() === 'success'; 
 
-    if (!saveTxRes.ok) {
-      const errData = await saveTxRes.json();
-      throw new Error(errData.message || 'Failed to store transaction');
-    }
+    console.log("Final status:", status, "Success:", isSuccess);
 
+    
+    // 4. Save transaction in DB
+    await new Promise(resolve => setTimeout(resolve, 3000));
     if (isSuccess) {
-      Alert.alert('Success', 'Your payment was successful and recorded.');
+      Alert.alert('✅ Payment Successful', 'Your payment was completed and will be recorded.');
     } else {
-      Alert.alert('Failed', 'Payment not completed. Transaction saved for reference.');
+      Alert.alert('⚠️ Payment Incomplete', 'Payment was not completed. Transaction will be saved for reference.');
     }
+ const MAX_RETRIES = 3;
+
+const tryCreateTransaction = async () => {
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const saveTxRes = await fetch(`${BASE_URL}/transactions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: nameOrCode,
+          amount: parseInt(amount),
+          phoneNumber: finalPhone,
+          category: 'Tithe',
+          status: status,
+          referenceId: paymentId,
+        }),
+      });
+
+      if (!saveTxRes.ok) {
+        const errData = await saveTxRes.json();
+        throw new Error(errData.message || 'Failed to store transaction');
+      }
+
+      const txData = await saveTxRes.json();
+      return txData; // success
+    } catch (err) {
+      console.warn(`Attempt ${attempt} failed: ${err.message}`);
+      if (attempt < MAX_RETRIES) {
+        await new Promise((resolve) => setTimeout(resolve, 1000)); // wait 1s before retry
+      } else {
+        throw err; // rethrow after last attempt
+      }
+    }
+  }
+};
+await tryCreateTransaction();
+
+    
 
   } catch (err) {
-    console.error(err);
-    Alert.alert('Error', err.message || 'An error occurred during payment.');
+    console.error('Payment Error:', err);
+    Alert.alert('Error', err.message || 'Something went wrong during payment.');
   } finally {
     setLoading(false);
   }
 };
+
 
 
   return (

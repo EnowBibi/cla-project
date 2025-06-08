@@ -12,10 +12,10 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  View,
+  View
 } from 'react-native';
 
-const OfferingPaymentScreen = () => {
+const PartnershipPaymentScreen = () => {
   const [nameOrCode, setNameOrCode] = useState('');
   const [amount, setAmount] = useState('');
   const [phone, setPhone] = useState('');
@@ -23,7 +23,6 @@ const OfferingPaymentScreen = () => {
   const [loading, setLoading] = useState(false);
   const [scaleAnim] = useState(new Animated.Value(1));
 
-  // Load phone from AsyncStorage
   useEffect(() => {
     const loadPhone = async () => {
       try {
@@ -33,7 +32,7 @@ const OfferingPaymentScreen = () => {
           if (user.phone) setPhone(user.phone.toString());
         }
       } catch (err) {
-        console.error('Failed to load user info:', err);
+        console.error('Failed to load phone number:', err);
       }
     };
     if (useDefaultNumber) loadPhone();
@@ -51,93 +50,76 @@ const OfferingPaymentScreen = () => {
     }
 
     setLoading(true);
-
     let finalPhone = phone.replace(/\s+/g, '');
-    if (!finalPhone.startsWith('237')) {
-      finalPhone = '237' + finalPhone;
-    }
+    if (!finalPhone.startsWith('237')) finalPhone = '237' + finalPhone;
 
     try {
       const token = await AsyncStorage.getItem('token');
 
-      // 1. Initiate payment
+      // 1. Collect payment
       const collectRes = await fetch(`${BASE_URL}/payment/collect-payment`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          amount: parseInt(amount),
-          phoneNumber: finalPhone,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: parseInt(amount), phoneNumber: finalPhone }),
       });
 
       const collectData = await collectRes.json();
       if (!collectRes.ok || !collectData?.data?.id) {
-        throw new Error(collectData.error || 'Failed to initiate payment');
+        throw new Error(collectData.error || 'Failed to initiate payment.');
       }
 
       const paymentId = collectData.data.id;
-      Alert.alert('Payment Initiated', 'Please complete the payment on your phone.');
+      Alert.alert('Payment Initiated', 'Please confirm payment on your phone.');
 
-      // 2. Wait 70 seconds for user to confirm
+      // 2. Wait and check status
       await new Promise(resolve => setTimeout(resolve, 70000));
 
-      // 3. Check payment status
       const statusRes = await fetch(`${BASE_URL}/payment/${paymentId}`);
       const statusData = await statusRes.json();
-
       const status = statusData?.data?.status;
       const isSuccess = status.toLowerCase() === 'success';
 
       if (isSuccess) {
-        Alert.alert('✅ Payment Successful', 'Your payment was completed and will be recorded.');
+        Alert.alert('✅ Payment Successful', 'Thank you for your partnership seed.');
       } else {
-        Alert.alert('⚠️ Payment Incomplete', 'Payment was not completed. Transaction will be saved for reference.');
+        Alert.alert('⚠️ Payment Incomplete', 'We will still record this for reference.');
       }
 
-      // 4. Save transaction with retry logic
+      // 3. Store transaction
       const MAX_RETRIES = 3;
-      const tryCreateTransaction = async () => {
-        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-          try {
-            const saveTxRes = await fetch(`${BASE_URL}/transactions`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${token}`,
-              },
-              body: JSON.stringify({
-                name: nameOrCode,
-                amount: parseInt(amount),
-                phoneNumber: finalPhone,
-                category: 'Offering',
-                status,
-                referenceId: paymentId,
-              }),
-            });
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          const saveTxRes = await fetch(`${BASE_URL}/transactions`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              name: nameOrCode,
+              amount: parseInt(amount),
+              phoneNumber: finalPhone,
+              category: 'Partnership',
+              status,
+              referenceId: paymentId,
+            }),
+          });
 
-            if (!saveTxRes.ok) {
-              const errData = await saveTxRes.json();
-              throw new Error(errData.message || 'Failed to store transaction');
-            }
-
-            return await saveTxRes.json(); // Success
-          } catch (err) {
-            console.warn(`Attempt ${attempt} failed: ${err.message}`);
-            if (attempt < MAX_RETRIES) {
-              await new Promise(res => setTimeout(res, 1000));
-            } else {
-              throw err;
-            }
+          if (!saveTxRes.ok) {
+            const err = await saveTxRes.json();
+            throw new Error(err.message || 'Failed to store transaction.');
           }
-        }
-      };
 
-      await tryCreateTransaction();
+          break;
+        } catch (err) {
+          console.warn(`Retry ${attempt} failed:`, err.message);
+          if (attempt === MAX_RETRIES) throw err;
+          await new Promise(res => setTimeout(res, 1000));
+        }
+      }
     } catch (err) {
       console.error('Payment Error:', err);
-      Alert.alert('Error', err.message || 'Something went wrong during payment.');
+      Alert.alert('Error', err.message || 'Something went wrong.');
     } finally {
       setLoading(false);
     }
@@ -150,10 +132,10 @@ const OfferingPaymentScreen = () => {
         style={{ flex: 1 }}
       >
         <View style={styles.form}>
-          <Text style={styles.title}>Give an Offering</Text>
+          <Text style={styles.title}>Pay Your Partnership</Text>
 
           <Text style={styles.scripture}>
-            "Each one must give as he has decided in his heart..." — 2 Corinthians 9:7
+            “But I have received everything in full... what you sent, a fragrant offering...” — Philippians 4:18
           </Text>
 
           <TextInput
@@ -201,7 +183,7 @@ const OfferingPaymentScreen = () => {
               {loading ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.payText}>Give Now</Text>
+                <Text style={styles.payText}>Sow Now</Text>
               )}
             </Pressable>
           </Animated.View>
@@ -211,7 +193,7 @@ const OfferingPaymentScreen = () => {
   );
 };
 
-export default OfferingPaymentScreen;
+export default PartnershipPaymentScreen;
 
 const styles = StyleSheet.create({
   container: {

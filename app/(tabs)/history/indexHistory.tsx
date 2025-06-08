@@ -1,5 +1,8 @@
-import React from 'react';
+import { BASE_URL } from '@/constants/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   FlatList,
   ListRenderItem,
   SafeAreaView,
@@ -8,39 +11,65 @@ import {
   View,
 } from 'react-native';
 
-// Define the type for each payment history item
 type PaymentItem = {
-  id: string;
-  type: string;
-  amount: string;
-  date: string;
+  _id: string;
+  category: string;
+  amount: number;
+  createdAt: string;
 };
 
-const mockHistory: PaymentItem[] = [
-  { id: '1', type: 'Tithe', amount: '5,000', date: '2025-06-01' },
-  { id: '2', type: 'Offering', amount: '2,000', date: '2025-05-28' },
-  { id: '3', type: 'Donation', amount: '10,000', date: '2025-05-20' },
-  { id: '4', type: 'Special Seed', amount: '15,000', date: '2025-05-15' },
-];
-
 const PaymentHistoryScreen = () => {
+  const [history, setHistory] = useState<PaymentItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchHistory = async () => {
+      try {
+        const token = await AsyncStorage.getItem('token');
+        const res = await fetch(`${BASE_URL}/transactions/my`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (!res.ok) throw new Error('Failed to fetch transactions.');
+
+        const data = await res.json();
+        setHistory(data);
+      } catch (err) {
+        console.error('Error loading history:', err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchHistory();
+  }, []);
+
   const renderItem: ListRenderItem<PaymentItem> = ({ item }) => (
     <View style={styles.card}>
-      <Text style={styles.type}>{item.type}</Text>
-      <Text style={styles.amount}>XAF {item.amount}</Text>
-      <Text style={styles.date}>{item.date}</Text>
+      <Text style={styles.type}>{item.category}</Text>
+      <Text style={styles.amount}>XAF {item.amount.toLocaleString()}</Text>
+      <Text style={styles.date}>{new Date(item.createdAt).toLocaleDateString()}</Text>
     </View>
   );
 
   return (
     <SafeAreaView style={styles.container}>
       <Text style={styles.title}>Payment History</Text>
-      <FlatList
-        data={mockHistory}
-        renderItem={renderItem}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.list}
-      />
+
+      {loading ? (
+        <ActivityIndicator size="large" color="#EB1A1A" style={{ marginTop: 50 }} />
+      ) : history.length === 0 ? (
+        <Text style={styles.emptyText}>You have no transactions yet.</Text>
+      ) : (
+        <FlatList
+          data={history}
+          renderItem={renderItem}
+          keyExtractor={(item) => item._id}
+          contentContainerStyle={styles.list}
+        />
+      )}
     </SafeAreaView>
   );
 };
@@ -90,5 +119,11 @@ const styles = StyleSheet.create({
     color: '#999',
     marginTop: 5,
     fontFamily: 'sans-serif-light',
+  },
+  emptyText: {
+    textAlign: 'center',
+    marginTop: 50,
+    fontSize: 16,
+    color: '#999',
   },
 });

@@ -1,16 +1,18 @@
-import React, { useState } from 'react';
+import { BASE_URL } from '@/constants/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { useEffect, useState } from 'react';
 import {
-    Alert,
-    Animated,
-    Easing,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View
 } from 'react-native';
 
 const DonationPaymentScreen = () => {
@@ -18,35 +20,107 @@ const DonationPaymentScreen = () => {
   const [amount, setAmount] = useState('');
   const [phone, setPhone] = useState('');
   const [useDefaultNumber, setUseDefaultNumber] = useState(true);
-
+  const [loading, setLoading] = useState(false);
   const [scaleAnim] = useState(new Animated.Value(1));
+
+  useEffect(() => {
+    const loadPhone = async () => {
+      try {
+        const userData = await AsyncStorage.getItem('userInfo');
+        if (userData) {
+          const user = JSON.parse(userData);
+          if (user.phone) setPhone(user.phone.toString());
+        }
+      } catch (err) {
+        console.error('Failed to load phone number:', err);
+      }
+    };
+    if (useDefaultNumber) loadPhone();
+  }, [useDefaultNumber]);
 
   const handleTogglePhone = () => {
     setUseDefaultNumber(!useDefaultNumber);
-    if (useDefaultNumber) setPhone('');
+    if (!useDefaultNumber) setPhone('');
   };
 
-  const handlePayment = () => {
-    Animated.sequence([
-      Animated.timing(scaleAnim, {
-        toValue: 0.95,
-        duration: 100,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      }),
-      Animated.timing(scaleAnim, {
-        toValue: 1,
-        duration: 100,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      Alert.alert(
-        'Donation Initiated',
-        `Your donation of XAF${amount} has been initiated.`,
-        [{ text: 'OK' }]
-      );
-    });
+  const handlePayment = async () => {
+    if (!nameOrCode || !amount) {
+      Alert.alert('Missing Fields', 'Please enter your name/code and amount.');
+      return;
+    }
+
+    setLoading(true);
+    let finalPhone = phone.replace(/\s+/g, '');
+    if (!finalPhone.startsWith('237')) finalPhone = '237' + finalPhone;
+
+    try {
+      const token = await AsyncStorage.getItem('token');
+
+      const collectRes = await fetch(`${BASE_URL}/payment/collect-payment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: parseInt(amount), phoneNumber: finalPhone }),
+      });
+
+      const collectData = await collectRes.json();
+      if (!collectRes.ok || !collectData?.data?.id) {
+        throw new Error(collectData.error || 'Failed to initiate payment.');
+      }
+
+      const paymentId = collectData.data.id;
+      Alert.alert('Payment Initiated', 'Please confirm payment on your phone.');
+
+      await new Promise(resolve => setTimeout(resolve, 70000));
+
+      const statusRes = await fetch(`${BASE_URL}/payment/${paymentId}`);
+      const statusData = await statusRes.json();
+      const status = statusData?.data?.status;
+      const isSuccess = status.toLowerCase() === 'success';
+
+      if (isSuccess) {
+        Alert.alert('✅ Donation Successful', 'Thank you for your generous donation!');
+      } else {
+        Alert.alert('⚠️ Donation Incomplete', 'We will still record this for reference.');
+      }
+
+      // Save transaction
+      const MAX_RETRIES = 3;
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          const saveTxRes = await fetch(`${BASE_URL}/transactions`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              name: nameOrCode,
+              amount: parseInt(amount),
+              phoneNumber: finalPhone,
+              category: 'Donation',
+              status,
+              referenceId: paymentId,
+            }),
+          });
+
+          if (!saveTxRes.ok) {
+            const err = await saveTxRes.json();
+            throw new Error(err.message || 'Failed to store transaction.');
+          }
+
+          break;
+        } catch (err) {
+          console.warn(`Retry ${attempt} failed:`, err.message);
+          if (attempt === MAX_RETRIES) throw err;
+          await new Promise(res => setTimeout(res, 1000));
+        }
+      }
+    } catch (err) {
+      console.error('Donation Error:', err);
+      Alert.alert('Error', err.message || 'Something went wrong.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -63,10 +137,11 @@ const DonationPaymentScreen = () => {
           </Text>
 
           <TextInput
-            placeholder="Name "
+            placeholder="Name"
             value={nameOrCode}
             onChangeText={setNameOrCode}
             style={styles.input}
+            editable={!loading}
           />
 
           <TextInput
@@ -75,6 +150,7 @@ const DonationPaymentScreen = () => {
             onChangeText={setAmount}
             keyboardType="numeric"
             style={styles.input}
+            editable={!loading}
           />
 
           {!useDefaultNumber && (
@@ -84,10 +160,11 @@ const DonationPaymentScreen = () => {
               onChangeText={setPhone}
               keyboardType="phone-pad"
               style={styles.input}
+              editable={!loading}
             />
           )}
 
-          <Pressable onPress={handleTogglePhone} style={styles.toggleButton}>
+          <Pressable onPress={handleTogglePhone} style={styles.toggleButton} disabled={loading}>
             <Text style={styles.toggleText}>
               {useDefaultNumber
                 ? 'Use another phone number'
@@ -96,8 +173,16 @@ const DonationPaymentScreen = () => {
           </Pressable>
 
           <Animated.View style={{ transform: [{ scale: scaleAnim }], width: '100%' }}>
-            <Pressable style={styles.payButton} onPress={handlePayment}>
-              <Text style={styles.payText}>Donate Now</Text>
+            <Pressable
+              style={[styles.payButton, loading && { opacity: 0.6 }]}
+              onPress={handlePayment}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.payText}>Donate Now</Text>
+              )}
             </Pressable>
           </Animated.View>
         </View>
